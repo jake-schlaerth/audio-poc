@@ -1,0 +1,46 @@
+[gd_scene load_steps=5 format=3 uid="uid://2n4g4bul7bdv"]
+
+[ext_resource type="Script" path="res://fluid/fluid_sim.gd" id="1_fluid"]
+[ext_resource type="Script" path="res://fluid/fluid_audio.gd" id="2_audio"]
+[ext_resource type="FontFile" uid="uid://b1kf02uy3srq3" path="res://assets/fonts/joystix monospace.otf" id="3_ku0yh"]
+[ext_resource type="Script" path="res://fluid/text_cycler.gd" id="4_cycler"]
+
+[node name="FluidSim" type="Node"]
+script = ExtResource("1_fluid")
+
+[node name="FluidAudio" type="Node" parent="."]
+unique_name_in_owner = true
+script = ExtResource("2_audio")
+
+[node name="SimA" type="SubViewport" parent="."]
+unique_name_in_owner = true
+
+[node name="FieldA" type="ColorRect" parent="SimA"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+
+[node name="SimB" type="SubViewport" parent="."]
+unique_name_in_owner = true
+
+[node name="FieldB" type="ColorRect" parent="SimB"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+
+[node name="Display" type="ColorRect" parent="."]
+unique_name_in_owner = true
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+
+[node name="CenterContainer" type="CenterContainer" parent="."]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+
+[node name="Label" type="Label" parent="CenterContainer"]
+layout_mode = 2
+theme_override_fonts/font = ExtResource("3_ku0yh")
+text = "Hello Cruel World"
+script = ExtResource("4_cycler")
