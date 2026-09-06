@@ -74,8 +74,7 @@ class Spark extends RefCounted:
 @export_range(0.0, 1.0) var text_ink_strength: float = 0.25
 @export_range(0.0, 1.0) var text_ink_maintain: float = 0.12
 @export_range(0.0, 4.0) var text_ink_fade_in: float = 0.5
-@export_range(0.0, 15.0) var text_ink_hold: float = 2.5
-@export_range(0.0, 6.0) var text_ink_fade_out: float = 2.0
+@export_range(0.0, 3.0) var text_ink_transition: float = 0.7
 @export_range(0.0, 1.0) var text_ink_calm: float = 0.92
 @export_range(0.0, 0.3) var text_ink_stir: float = 0.04
 @export_range(0.5, 16.0) var text_ink_stir_scale: float = 6.0
@@ -105,6 +104,7 @@ var _activity: float = 0.0
 var _motion_accum: float = 0.0
 
 var _ink_age: float = -1.0
+var _transition_age: float = -1.0
 
 ## Sparks currently in the air. Empty between text changes.
 var _sparks: Array[Spark] = []
@@ -279,6 +279,8 @@ func _update_sparks(delta: float) -> void:
 
 
 func _on_phrase_changed(phrase: String, _index: int) -> void:
+	if _ink_age >= 0.0 or _ink_label.text != "":
+		_transition_age = 0.0
 	_ink_label.text = phrase
 	_ink_age = 0.0 if not phrase.strip_edges().is_empty() else -1.0
 
@@ -293,21 +295,22 @@ func _update_text_ink(delta: float) -> void:
 	if _ink_age >= 0.0:
 		_ink_age += delta
 		var fade_in: float = maxf(text_ink_fade_in, 0.0001)
-		var fade_out: float = maxf(text_ink_fade_out, 0.0001)
-		var hold_end: float = fade_in + text_ink_hold
 		var maintain: float = text_ink_maintain / maxf(text_ink_strength, 0.0001)
-		if _ink_age >= hold_end + fade_out:
-			_ink_age = -1.0
-		elif _ink_age < fade_in:
+		if _ink_age < fade_in:
 			inject = _ink_age / fade_in
 			calm = clampf(_ink_age / (fade_in * 0.3), 0.0, 1.0)
-		elif _ink_age < hold_end:
+		else:
 			inject = maintain
 			calm = 1.0
+
+	var clear_t: float = 0.0
+	if _transition_age >= 0.0:
+		_transition_age += delta
+		var trans: float = maxf(text_ink_transition, 0.0001)
+		if _transition_age >= trans:
+			_transition_age = -1.0
 		else:
-			var out_t: float = (_ink_age - hold_end) / fade_out
-			inject = maintain * (1.0 - out_t)
-			calm = 1.0 - out_t
+			clear_t = 1.0 - _transition_age / trans
 
 	var presence: float = clampf(calm, 0.0, 1.0)
 	_sim_material.set_shader_parameter("u_text_mask", _text_mask.get_texture())
@@ -316,7 +319,8 @@ func _update_text_ink(delta: float) -> void:
 	_sim_material.set_shader_parameter("u_text_stir", presence * text_ink_stir)
 	_sim_material.set_shader_parameter("u_text_stir_scale", text_ink_stir_scale)
 	_sim_material.set_shader_parameter("u_text_stir_speed", text_ink_stir_speed)
-	_motion_accum += presence * text_ink_stir_music * delta
+	_sim_material.set_shader_parameter("u_text_clear", clear_t)
+	_motion_accum += maxf(presence, clear_t) * text_ink_stir_music * delta
 
 
 func _input(event: InputEvent) -> void:

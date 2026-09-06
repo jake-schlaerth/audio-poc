@@ -40,6 +40,7 @@ uniform float u_text_calm      = 0.0;
 uniform float u_text_stir      = 0.0;
 uniform float u_text_stir_scale = 6.0;
 uniform float u_text_stir_speed = 0.35;
+uniform float u_text_clear      = 0.0;
 
 uniform float u_ambient_flow  = 0.0;
 uniform float u_ambient_scale  = 3.0;
@@ -130,8 +131,16 @@ void fragment() {
 			dye += influence * 0.5;
 		}
 
-		if (u_text_amount > 0.0 || u_text_calm > 0.0 || u_text_stir > 0.0) {
+		if (u_text_amount > 0.0 || u_text_calm > 0.0 || u_text_stir > 0.0 || u_text_clear > 0.0) {
 			float m = texture(u_text_mask, uv).r;
+
+			if (u_text_clear > 0.0) {
+				float k = u_text_clear * (1.0 - m);
+				dye *= mix(1.0, 0.85, k);
+				vec2 cn = curlNoise(uv * 4.0 - u_time * 0.5);
+				newVel += cn * k * 0.09;
+			}
+
 			dye += m * u_text_amount;
 			newVel = mix(newVel, vec2(0.0), clamp(m * u_text_calm, 0.0, 1.0));
 
