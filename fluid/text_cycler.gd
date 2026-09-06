@@ -24,6 +24,8 @@ extends Label
 @export_range(0.1, 1.0) var pop_from_scale: float = 0.7
 
 @export_range(0, 16) var text_outline_size: int = 8
+@export var show_overlay: bool = false
+@export var emit_sparks: bool = false
 
 var _index: int = 0
 var _tween: Tween
@@ -32,8 +34,10 @@ var _tween: Tween
 func _ready() -> void:
 	add_theme_color_override(&"font_outline_color", Color.BLACK)
 	add_theme_constant_override(&"outline_size", text_outline_size)
+	visible = show_overlay
 	if not phrases.is_empty():
 		text = phrases[0]
+		SignalBus.phrase_changed.emit.call_deferred(phrases[0], 0)
 	resized.connect(_recenter_pivot)
 	_recenter_pivot()
 
@@ -53,7 +57,8 @@ func cycle() -> void:
 	_index = (_index + 1) % phrases.size()
 	var next_text: String = phrases[_index]
 
-	SignalBus.fluid_sparks_requested.emit(_normalized_rect())
+	if emit_sparks:
+		SignalBus.fluid_sparks_requested.emit(_normalized_rect())
 	SignalBus.phrase_changed.emit(next_text, _index)
 
 	if _tween != null and _tween.is_valid():

@@ -31,10 +31,13 @@ class Spark extends RefCounted:
 @export var sim_resolution: Vector2i = Vector2i(512, 512)
 ## Multiplier applied to frame delta before it reaches the shader.
 @export var simulation_speed: float = 60.0
-@export_range(0.0001, 2.0) var viscosity: float = 0.5
-@export_range(0.0, 5.0) var vorticity: float = 1.0
+@export_range(0.0001, 4.0) var viscosity: float = 1.2
+@export_range(0.0, 5.0) var vorticity: float = 0.5
 ## Dye retention per step (1.0 = never fades).
-@export_range(0.9, 1.0, 0.001) var dissipation: float = 0.995
+@export_range(0.9, 1.0, 0.0005) var dissipation: float = 0.9955
+@export_range(0.0, 0.25) var dye_diffuse: float = 0.0025
+@export_range(0.0, 1.0) var ambient_flow: float = 0.0
+@export_range(0.5, 12.0) var ambient_scale: float = 3.0
 ## Radius of the mouse force splat, in normalized screen units.
 @export_range(0.01, 0.3) var force_radius: float = 0.08
 ## Scales pointer motion into injected velocity.
@@ -67,9 +70,19 @@ class Spark extends RefCounted:
 ## units; it then eases back via [member activity_release].
 @export var spark_stir: float = 2.2
 
+@export_group("Text ink")
+@export_range(0.0, 1.0) var text_ink_strength: float = 0.25
+@export_range(0.0, 1.0) var text_ink_maintain: float = 0.12
+@export_range(0.0, 4.0) var text_ink_fade_in: float = 0.5
+@export_range(0.0, 15.0) var text_ink_hold: float = 2.5
+@export_range(0.0, 6.0) var text_ink_fade_out: float = 2.0
+@export_range(0.0, 1.0) var text_ink_calm: float = 0.92
+
 @onready var _a: SubViewport = %SimA
 @onready var _b: SubViewport = %SimB
 @onready var _display: ColorRect = %Display
+@onready var _text_mask: SubViewport = %TextMask
+@onready var _ink_label: Label = %InkLabel
 
 var _sim_material: ShaderMaterial
 var _display_material: ShaderMaterial
@@ -86,6 +99,8 @@ var _mouse_down: bool = false
 var _activity: float = 0.0
 ## Normalized pointer distance travelled since the last frame.
 var _motion_accum: float = 0.0
+
+var _ink_age: float = -1.0
 
 ## Sparks currently in the air. Empty between text changes.
 var _sparks: Array[Spark] = []
@@ -124,7 +139,13 @@ func _ready() -> void:
 	_spark_vel_buf.resize(MAX_SPARKS)
 	_spark_str_buf.resize(MAX_SPARKS)
 
+	_text_mask.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	_text_mask.render_target_clear_mode = SubViewport.CLEAR_MODE_ALWAYS
+	_resize_text_mask()
+	get_viewport().size_changed.connect(_resize_text_mask)
+
 	SignalBus.fluid_sparks_requested.connect(spark_halo)
+	SignalBus.phrase_changed.connect(_on_phrase_changed)
 
 
 func _process(delta: float) -> void:
@@ -132,6 +153,7 @@ func _process(delta: float) -> void:
 	var dt: float = minf(delta, 1.0 / 30.0) * simulation_speed
 
 	_update_sparks(delta)
+	_update_text_ink(delta)
 
 	_sim_material.set_shader_parameter("u_time", _elapsed)
 	_sim_material.set_shader_parameter("u_dt", dt)
@@ -139,6 +161,9 @@ func _process(delta: float) -> void:
 	_sim_material.set_shader_parameter("u_viscosity", maxf(viscosity, 0.0001))
 	_sim_material.set_shader_parameter("u_vorticity", vorticity)
 	_sim_material.set_shader_parameter("u_dissipation", dissipation)
+	_sim_material.set_shader_parameter("u_dye_diffuse", dye_diffuse)
+	_sim_material.set_shader_parameter("u_ambient_flow", ambient_flow)
+	_sim_material.set_shader_parameter("u_ambient_scale", ambient_scale)
 	_sim_material.set_shader_parameter("u_force_radius", force_radius)
 	_sim_material.set_shader_parameter("u_force_pos", _force_pos)
 	_sim_material.set_shader_parameter("u_force_dir", _force_dir)
@@ -247,6 +272,42 @@ func _update_sparks(delta: float) -> void:
 	if all_done:
 		_sparks.clear()
 		_sim_material.set_shader_parameter("u_spark_count", 0)
+
+
+func _on_phrase_changed(phrase: String, _index: int) -> void:
+	_ink_label.text = phrase
+	_ink_age = 0.0 if not phrase.strip_edges().is_empty() else -1.0
+
+
+func _resize_text_mask() -> void:
+	_text_mask.size = Vector2i(get_viewport().get_visible_rect().size)
+
+
+func _update_text_ink(delta: float) -> void:
+	var inject: float = 0.0
+	var calm: float = 0.0
+	if _ink_age >= 0.0:
+		_ink_age += delta
+		var fade_in: float = maxf(text_ink_fade_in, 0.0001)
+		var fade_out: float = maxf(text_ink_fade_out, 0.0001)
+		var hold_end: float = fade_in + text_ink_hold
+		var maintain: float = text_ink_maintain / maxf(text_ink_strength, 0.0001)
+		if _ink_age >= hold_end + fade_out:
+			_ink_age = -1.0
+		elif _ink_age < fade_in:
+			inject = _ink_age / fade_in
+			calm = clampf(_ink_age / (fade_in * 0.3), 0.0, 1.0)
+		elif _ink_age < hold_end:
+			inject = maintain
+			calm = 1.0
+		else:
+			var out_t: float = (_ink_age - hold_end) / fade_out
+			inject = maintain * (1.0 - out_t)
+			calm = 1.0 - out_t
+
+	_sim_material.set_shader_parameter("u_text_mask", _text_mask.get_texture())
+	_sim_material.set_shader_parameter("u_text_amount", clampf(inject, 0.0, 1.0) * text_ink_strength)
+	_sim_material.set_shader_parameter("u_text_calm", clampf(calm, 0.0, 1.0) * text_ink_calm)
 
 
 func _input(event: InputEvent) -> void:
