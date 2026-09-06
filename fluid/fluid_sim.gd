@@ -77,6 +77,10 @@ class Spark extends RefCounted:
 @export_range(0.0, 15.0) var text_ink_hold: float = 2.5
 @export_range(0.0, 6.0) var text_ink_fade_out: float = 2.0
 @export_range(0.0, 1.0) var text_ink_calm: float = 0.92
+@export_range(0.0, 0.3) var text_ink_stir: float = 0.04
+@export_range(0.5, 16.0) var text_ink_stir_scale: float = 6.0
+@export_range(0.0, 2.0) var text_ink_stir_speed: float = 0.35
+@export_range(0.0, 3.0) var text_ink_stir_music: float = 0.4
 
 @onready var _a: SubViewport = %SimA
 @onready var _b: SubViewport = %SimB
@@ -305,9 +309,14 @@ func _update_text_ink(delta: float) -> void:
 			inject = maintain * (1.0 - out_t)
 			calm = 1.0 - out_t
 
+	var presence: float = clampf(calm, 0.0, 1.0)
 	_sim_material.set_shader_parameter("u_text_mask", _text_mask.get_texture())
 	_sim_material.set_shader_parameter("u_text_amount", clampf(inject, 0.0, 1.0) * text_ink_strength)
-	_sim_material.set_shader_parameter("u_text_calm", clampf(calm, 0.0, 1.0) * text_ink_calm)
+	_sim_material.set_shader_parameter("u_text_calm", presence * text_ink_calm)
+	_sim_material.set_shader_parameter("u_text_stir", presence * text_ink_stir)
+	_sim_material.set_shader_parameter("u_text_stir_scale", text_ink_stir_scale)
+	_sim_material.set_shader_parameter("u_text_stir_speed", text_ink_stir_speed)
+	_motion_accum += presence * text_ink_stir_music * delta
 
 
 func _input(event: InputEvent) -> void:
