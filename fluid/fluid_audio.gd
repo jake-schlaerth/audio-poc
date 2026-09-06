@@ -2,7 +2,7 @@ class_name FluidAudio
 extends Node
 ## Adaptive music layer for the fluid simulation.
 ##
-## Runs [member world_loop] (calm, sparse) and [member boss_loop] (busy, intense)
+## Runs [member low_loop] (calm, sparse) and [member high_loop] (busy, intense)
 ## as two looping players started on the same frame. Both clips are the same
 ## length and share the audio output clock, so once started they stay aligned
 ## for the session.
@@ -14,34 +14,29 @@ extends Node
 ## also callable directly for tests.
 
 ## Calm, sparse loop heard while the fluid is idle.
-@export var world_loop: AudioStream = preload("res://assets/DessWorldLoop.ogg")
-## Active, intense loop heard while the fluid is being stirred hard.
-@export var boss_loop: AudioStream = preload("res://assets/DessBossLoop.ogg")
-## Audio bus both players route to.
+@export var low_loop: AudioStream = preload("res://assets/music/low-loop.ogg")
+@export var high_loop: AudioStream = preload("res://assets/music/high-loop.ogg")
 @export var bus: StringName = &"Master"
-## Seconds for the heard mix to chase a *rising* intensity (boss fades in).
 @export_range(0.01, 5.0) var fade_in_time: float = 0.01
-## Seconds for the heard mix to chase a *falling* intensity (boss tails out).
 @export_range(0.01, 10.0) var fade_out_time: float = 0.01
-## Normalized gain at or below which a layer is fully muted.
 @export_range(0.0001, 0.1) var silence_threshold: float = 0.001
 
 const MUTE_DB: float = -80.0
 const SHUTDOWN_DRAIN_TIME: float = 0.1
 
-var _world_player: AudioStreamPlayer
-var _boss_player: AudioStreamPlayer
+var _low_player: AudioStreamPlayer
+var _high_player: AudioStreamPlayer
 var _target: float = 0.0
 var _mix: float = 0.0
 
 
 func _ready() -> void:
-	_world_player = _make_player(&"WorldMusic", world_loop)
-	_boss_player = _make_player(&"BossMusic", boss_loop)
+	_low_player = _make_player(&"LowMusic", low_loop)
+	_high_player = _make_player(&"HighMusic", high_loop)
 	_apply_mix()
 	# Same frame, same audio clock -> the two loops start sample-aligned.
-	_world_player.play()
-	_boss_player.play()
+	_low_player.play()
+	_high_player.play()
 
 	SignalBus.fluid_activity_changed.connect(set_intensity)
 
@@ -54,8 +49,8 @@ func _notification(what: int) -> void:
 
 
 func _shutdown() -> void:
-	_world_player.stop()
-	_boss_player.stop()
+	_low_player.stop()
+	_high_player.stop()
 	await get_tree().create_timer(SHUTDOWN_DRAIN_TIME).timeout
 	get_tree().quit()
 
@@ -85,8 +80,8 @@ func _make_player(node_name: StringName, stream: AudioStream) -> AudioStreamPlay
 func _apply_mix() -> void:
 	# Equal-power crossfade: the two gains sum in quadrature to 1.0, so the
 	# combined loudness stays flat through the blend instead of dipping.
-	_world_player.volume_db = _gain_to_db(sqrt(1.0 - _mix))
-	_boss_player.volume_db = _gain_to_db(sqrt(_mix))
+	_low_player.volume_db = _gain_to_db(sqrt(1.0 - _mix))
+	_high_player.volume_db = _gain_to_db(sqrt(_mix))
 
 
 func _gain_to_db(gain: float) -> float:
