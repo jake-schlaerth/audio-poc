@@ -23,11 +23,15 @@ extends Label
 ## Scale the incoming phrase grows from (1.0 = no pop).
 @export_range(0.1, 1.0) var pop_from_scale: float = 0.7
 
+@export_range(0, 16) var text_outline_size: int = 8
+
 var _index: int = 0
 var _tween: Tween
 
 
 func _ready() -> void:
+	add_theme_color_override(&"font_outline_color", Color.BLACK)
+	add_theme_constant_override(&"outline_size", text_outline_size)
 	if not phrases.is_empty():
 		text = phrases[0]
 	resized.connect(_recenter_pivot)

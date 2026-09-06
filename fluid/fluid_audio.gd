@@ -27,6 +27,7 @@ extends Node
 @export_range(0.0001, 0.1) var silence_threshold: float = 0.001
 
 const MUTE_DB: float = -80.0
+const SHUTDOWN_DRAIN_TIME: float = 0.1
 
 var _world_player: AudioStreamPlayer
 var _boss_player: AudioStreamPlayer
@@ -43,6 +44,20 @@ func _ready() -> void:
 	_boss_player.play()
 
 	SignalBus.fluid_activity_changed.connect(set_intensity)
+
+	get_tree().set_auto_accept_quit(false)
+
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_WM_CLOSE_REQUEST:
+		_shutdown()
+
+
+func _shutdown() -> void:
+	_world_player.stop()
+	_boss_player.stop()
+	await get_tree().create_timer(SHUTDOWN_DRAIN_TIME).timeout
+	get_tree().quit()
 
 
 func _process(delta: float) -> void:
