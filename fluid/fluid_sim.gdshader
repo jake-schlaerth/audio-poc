@@ -34,6 +34,18 @@ uniform vec2  u_spark_pos[MAX_SPARKS];
 uniform vec2  u_spark_vel[MAX_SPARKS];
 uniform float u_spark_strength[MAX_SPARKS];
 
+uniform sampler2D u_text_mask : filter_linear;
+uniform float u_text_amount   = 0.0;
+uniform float u_text_calm      = 0.0;
+uniform float u_text_stir      = 0.0;
+uniform float u_text_stir_scale = 6.0;
+uniform float u_text_stir_speed = 0.35;
+uniform float u_text_settle     = 0.0;
+
+uniform float u_ambient_flow  = 0.0;
+uniform float u_ambient_scale  = 3.0;
+uniform float u_dye_diffuse   = 0.0;
+
 vec4 decode(vec4 t) {
 	return vec4(t.rg * 2.0 - 1.0, t.b, t.a * 2.0 - 1.0);
 }
@@ -87,11 +99,17 @@ void fragment() {
 		vortForce = length(vortForce) > 0.0 ? normalize(vortForce) * vort * vec2(1.0, -1.0) : vec2(0.0);
 		newVel += vortForce * 0.0005;
 
+		if (u_ambient_flow > 0.0) {
+			vec2 cn = curlNoise(uv * u_ambient_scale + u_time * 0.05);
+			newVel += cn * u_ambient_flow;
+		}
+
 		// Damping so energy cannot accumulate without bound.
 		newVel *= 0.999;
 
 		// Dye advects with the flow and slowly fades.
-		float dye = advected.b * u_dissipation;
+		float dyeAvg = (L.b + R.b + T.b + B.b) * 0.25;
+		float dye = mix(advected.b, dyeAvg, u_dye_diffuse) * u_dissipation;
 
 		// External force / dye injection (mouse drag).
 		if (u_force_pos.x >= 0.0) {
@@ -112,6 +130,22 @@ void fragment() {
 			newVel += u_spark_vel[i] * influence;
 			dye += influence * 0.5;
 		}
+
+		if (u_text_amount > 0.0 || u_text_calm > 0.0 || u_text_stir > 0.0) {
+			float m = texture(u_text_mask, uv).r;
+			dye += m * u_text_amount;
+			newVel = mix(newVel, vec2(0.0), clamp(m * u_text_calm, 0.0, 1.0));
+
+			float md = m;
+			md = max(md, texture(u_text_mask, uv + vec2(texel.x * 3.0, 0.0)).r);
+			md = max(md, texture(u_text_mask, uv - vec2(texel.x * 3.0, 0.0)).r);
+			md = max(md, texture(u_text_mask, uv + vec2(0.0, texel.y * 3.0)).r);
+			md = max(md, texture(u_text_mask, uv - vec2(0.0, texel.y * 3.0)).r);
+			vec2 swirl = curlNoise(uv * u_text_stir_scale + u_time * u_text_stir_speed);
+			newVel += swirl * md * u_text_stir;
+		}
+
+		newVel *= mix(1.0, 0.9, u_text_settle);
 
 		newVel = clamp(newVel, vec2(-1.0), vec2(1.0));
 		pressure = clamp(pressure, -1.0, 1.0);
