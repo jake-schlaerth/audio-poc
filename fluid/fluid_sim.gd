@@ -34,7 +34,7 @@ class Spark extends RefCounted:
 @export_range(0.0001, 4.0) var viscosity: float = 1.2
 @export_range(0.0, 5.0) var vorticity: float = 0.5
 ## Dye retention per step (1.0 = never fades).
-@export_range(0.9, 1.0, 0.0005) var dissipation: float = 0.9955
+@export_range(0.9, 1.0, 0.0005) var dissipation: float = 0.989
 @export_range(0.0, 0.25) var dye_diffuse: float = 0.0025
 @export_range(0.0, 1.0) var ambient_flow: float = 0.0
 @export_range(0.5, 12.0) var ambient_scale: float = 3.0
@@ -74,9 +74,9 @@ class Spark extends RefCounted:
 @export_range(0.0, 1.0) var text_ink_strength: float = 0.25
 @export_range(0.0, 1.0) var text_ink_maintain: float = 0.12
 @export_range(0.0, 4.0) var text_ink_fade_in: float = 0.5
-@export_range(0.0, 3.0) var text_ink_transition: float = 0.7
-@export_range(0.0, 1.0) var text_ink_calm: float = 0.92
-@export_range(0.0, 0.3) var text_ink_stir: float = 0.04
+@export_range(0.0, 2.0) var text_ink_settle: float = 0.6
+@export_range(0.0, 1.0) var text_ink_calm: float = 0.95
+@export_range(0.0, 0.3) var text_ink_stir: float = 0.02
 @export_range(0.5, 16.0) var text_ink_stir_scale: float = 6.0
 @export_range(0.0, 2.0) var text_ink_stir_speed: float = 0.35
 @export_range(0.0, 3.0) var text_ink_stir_music: float = 0.4
@@ -104,7 +104,7 @@ var _activity: float = 0.0
 var _motion_accum: float = 0.0
 
 var _ink_age: float = -1.0
-var _transition_age: float = -1.0
+var _settle_age: float = -1.0
 
 ## Sparks currently in the air. Empty between text changes.
 var _sparks: Array[Spark] = []
@@ -279,8 +279,8 @@ func _update_sparks(delta: float) -> void:
 
 
 func _on_phrase_changed(phrase: String, _index: int) -> void:
-	if _ink_age >= 0.0 or _ink_label.text != "":
-		_transition_age = 0.0
+	if _ink_age >= 0.0:
+		_settle_age = 0.0
 	_ink_label.text = phrase
 	_ink_age = 0.0 if not phrase.strip_edges().is_empty() else -1.0
 
@@ -303,14 +303,14 @@ func _update_text_ink(delta: float) -> void:
 			inject = maintain
 			calm = 1.0
 
-	var clear_t: float = 0.0
-	if _transition_age >= 0.0:
-		_transition_age += delta
-		var trans: float = maxf(text_ink_transition, 0.0001)
-		if _transition_age >= trans:
-			_transition_age = -1.0
+	var settle: float = 0.0
+	if _settle_age >= 0.0:
+		_settle_age += delta
+		var settle_time: float = maxf(text_ink_settle, 0.0001)
+		if _settle_age >= settle_time:
+			_settle_age = -1.0
 		else:
-			clear_t = 1.0 - _transition_age / trans
+			settle = 1.0 - _settle_age / settle_time
 
 	var presence: float = clampf(calm, 0.0, 1.0)
 	_sim_material.set_shader_parameter("u_text_mask", _text_mask.get_texture())
@@ -319,8 +319,8 @@ func _update_text_ink(delta: float) -> void:
 	_sim_material.set_shader_parameter("u_text_stir", presence * text_ink_stir)
 	_sim_material.set_shader_parameter("u_text_stir_scale", text_ink_stir_scale)
 	_sim_material.set_shader_parameter("u_text_stir_speed", text_ink_stir_speed)
-	_sim_material.set_shader_parameter("u_text_clear", clear_t)
-	_motion_accum += maxf(presence, clear_t) * text_ink_stir_music * delta
+	_sim_material.set_shader_parameter("u_text_settle", settle)
+	_motion_accum += presence * text_ink_stir_music * delta
 
 
 func _input(event: InputEvent) -> void:
