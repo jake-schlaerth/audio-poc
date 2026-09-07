@@ -14,7 +14,7 @@ extends Label
 	"it is 105 degrees and rising",
 	"",
 	"white christmas indeed!",
-	""
+	"",
 ]
 ## Seconds for the outgoing phrase to fade away.
 @export_range(0.01, 1.0) var fade_out_time: float = 0.10
