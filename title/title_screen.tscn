@@ -1,0 +1,37 @@
+[gd_scene load_steps=5 format=3]
+
+[ext_resource type="PackedScene" uid="uid://2n4g4bul7bdv" path="res://fluid/fluid_sim.tscn" id="1_fluid"]
+[ext_resource type="Script" path="res://fluid/text_cycler.gd" id="2_cycler"]
+[ext_resource type="FontFile" uid="uid://b1kf02uy3srq3" path="res://assets/fonts/joystix monospace.otf" id="3_font"]
+[ext_resource type="Script" path="res://title/start_button.gd" id="4_start"]
+
+[node name="TitleScreen" type="Node"]
+
+[node name="FluidSim" parent="." instance=ExtResource("1_fluid")]
+
+[node name="CenterContainer" type="CenterContainer" parent="."]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+
+[node name="Label" type="Label" parent="CenterContainer"]
+layout_mode = 2
+theme_override_fonts/font = ExtResource("3_font")
+text = "Hello Cruel World"
+script = ExtResource("2_cycler")
+
+[node name="StartButton" type="Button" parent="."]
+anchor_left = 0.5
+anchor_right = 0.5
+anchor_top = 1.0
+anchor_bottom = 1.0
+offset_left = -96.0
+offset_top = -104.0
+offset_right = 96.0
+offset_bottom = -52.0
+grow_horizontal = 2
+grow_vertical = 0
+theme_override_fonts/font = ExtResource("3_font")
+theme_override_font_sizes/font_size = 28
+text = "START"
+script = ExtResource("4_start")
