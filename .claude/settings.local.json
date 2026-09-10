@@ -6,8 +6,5 @@
       "Bash(godot --headless --editor --quit)",
       "Bash(timeout 30 godot fluid/fluid_sim.tscn --quit-after 120)"
     ]
-  },
-  "worktree": {
-    "bgIsolation": "none"
   }
 }

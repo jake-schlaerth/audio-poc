@@ -31,6 +31,7 @@ const int MAX_SPARKS = 24;
 uniform int   u_spark_count  = 0;
 uniform float u_spark_radius = 0.012;
 uniform vec2  u_spark_pos[MAX_SPARKS];
+uniform vec2  u_spark_end[MAX_SPARKS];
 uniform vec2  u_spark_vel[MAX_SPARKS];
 uniform float u_spark_strength[MAX_SPARKS];
 
@@ -42,6 +43,21 @@ uniform float u_text_stir_scale = 6.0;
 uniform float u_text_stir_speed = 0.35;
 uniform float u_text_settle     = 0.0;
 
+uniform vec2  u_blob_pos          = vec2(-1.0);   // x < 0 => inactive
+uniform float u_blob_radius       = 0.0;
+uniform float u_blob_aspect       = 1.0;
+uniform float u_blob_dye          = 0.3;
+uniform float u_blob_ceil         = 0.7;
+uniform float u_blob_swirl        = 0.15;
+uniform float u_blob_swirl_scale  = 9.0;
+uniform float u_blob_swirl_speed  = 0.6;
+uniform float u_blob_edge         = 0.015;
+uniform float u_blob_pulse        = 0.0;
+
+uniform vec2  u_blob2_pos         = vec2(-1.0);
+uniform float u_blob2_radius      = 0.0;
+uniform float u_blob2_pulse       = 0.0;
+
 uniform float u_ambient_flow  = 0.0;
 uniform float u_ambient_scale  = 3.0;
 uniform float u_dye_diffuse   = 0.0;
@@ -52,6 +68,33 @@ vec4 decode(vec4 t) {
 
 vec4 samp(vec2 uv) {
 	return decode(texture(u_prev, uv));
+}
+
+float seg_dist(vec2 p, vec2 a, vec2 b) {
+	vec2 pa = p - a;
+	vec2 ba = b - a;
+	float h = clamp(dot(pa, ba) / max(dot(ba, ba), 1e-7), 0.0, 1.0);
+	return length(pa - ba * h);
+}
+
+void apply_blob(vec2 uv, vec2 bpos, float bradius, float bpulse, inout vec2 newVel, inout float dye) {
+	if (bpos.x < 0.0 || bradius <= 0.0) { return; }
+	vec2 bd = uv - bpos;
+	bd.x *= u_blob_aspect;
+	float d = length(bd);
+	float m = 1.0 - smoothstep(bradius - u_blob_edge, bradius + u_blob_edge, d);
+	if (m <= 0.0) { return; }
+
+	vec2 turb = curlNoise(uv * u_blob_swirl_scale + u_time * u_blob_swirl_speed);
+	turb += 0.6 * curlNoise(uv * (u_blob_swirl_scale * 2.3) - u_time * (u_blob_swirl_speed * 1.7));
+	turb += 0.3 * curlNoise(uv * (u_blob_swirl_scale * 5.1) + u_time * (u_blob_swirl_speed * 2.6));
+	newVel += turb * m * u_blob_swirl * (1.0 + bpulse * 3.5);
+
+	float rim = smoothstep(bradius * 0.4, bradius + u_blob_edge, d);
+	newVel -= normalize(bd + vec2(1e-5)) * rim * m * (0.018 + bpulse * 0.06);
+
+	float ceil = clamp(u_blob_ceil + bpulse * 0.22, 0.0, 1.0);
+	dye += m * u_blob_dye * (1.0 + bpulse * 0.5) * max(0.0, ceil - dye);
 }
 
 void fragment() {
@@ -125,8 +168,8 @@ void fragment() {
 			if (i >= u_spark_count) { break; }
 			float s = u_spark_strength[i];
 			if (s <= 0.0) { continue; }
-			vec2 sd = uv - u_spark_pos[i];
-			float influence = exp(-dot(sd, sd) / spark_r2) * s;
+			float sd = seg_dist(uv, u_spark_pos[i], u_spark_end[i]);
+			float influence = exp(-(sd * sd) / spark_r2) * s;
 			newVel += u_spark_vel[i] * influence;
 			dye += influence * 0.5;
 		}
@@ -146,6 +189,9 @@ void fragment() {
 		}
 
 		newVel *= mix(1.0, 0.9, u_text_settle);
+
+		apply_blob(uv, u_blob_pos, u_blob_radius, u_blob_pulse, newVel, dye);
+		apply_blob(uv, u_blob2_pos, u_blob2_radius, u_blob2_pulse, newVel, dye);
 
 		newVel = clamp(newVel, vec2(-1.0), vec2(1.0));
 		pressure = clamp(pressure, -1.0, 1.0);

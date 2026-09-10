@@ -1,0 +1,38 @@
+[gd_scene load_steps=5 format=3]
+
+[ext_resource type="PackedScene" uid="uid://2n4g4bul7bdv" path="res://fluid/fluid_sim.tscn" id="1_fluid"]
+[ext_resource type="Script" path="res://skilltree/skill_tree.gd" id="2_tree"]
+[ext_resource type="Script" path="res://game/circle_button.gd" id="3_button"]
+[ext_resource type="Script" path="res://game/tap_target.gd" id="4_tap"]
+
+[node name="SkillTree" type="Node"]
+script = ExtResource("2_tree")
+
+[node name="FluidBackground" parent="." instance=ExtResource("1_fluid")]
+unique_name_in_owner = true
+persistent_ink = true
+palette_start_tier = 0
+
+[node name="SkillHit" type="Control" parent="."]
+unique_name_in_owner = true
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+script = ExtResource("3_button")
+
+[node name="AutoHit" type="Control" parent="."]
+unique_name_in_owner = true
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+script = ExtResource("3_button")
+
+[node name="BackHit" type="Control" parent="."]
+unique_name_in_owner = true
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -98.0
+offset_top = 24.0
+offset_right = -24.0
+offset_bottom = 86.0
+script = ExtResource("4_tap")

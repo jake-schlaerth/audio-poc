@@ -21,11 +21,23 @@ const MAX_SPARKS: int = 24
 ## velocity that ramps up then fades over [member life].
 class Spark extends RefCounted:
 	var pos: Vector2      ## Fixed injection point, normalized screen / UV space.
+	var end_pos: Vector2  ## Other end of the injection segment; equal to pos for a point.
 	var dir: Vector2      ## Outward unit direction of the injected velocity.
 	var speed: float      ## Velocity magnitude at the spark's peak.
 	var life: float       ## Active duration in seconds.
+	var strength: float = 1.0  ## Per-spark scale on the volley strength.
 	var age: float = 0.0
 	var delay: float = 0.0  ## Seconds before the spark ignites.
+
+
+## One line in a lightning strike: a run of straight segments, possibly a fork.
+class Branch extends RefCounted:
+	var point: Vector2
+	var axis: Vector2
+	var side: float = 1.0
+	var length: int = 5
+	var gen: int = 0
+	var delay: float = 0.0
 
 ## Internal simulation grid size. Independent of the window resolution.
 @export var sim_resolution: Vector2i = Vector2i(512, 512)
@@ -80,6 +92,38 @@ class Spark extends RefCounted:
 @export_range(0.5, 16.0) var text_ink_stir_scale: float = 6.0
 @export_range(0.0, 2.0) var text_ink_stir_speed: float = 0.35
 @export_range(0.0, 3.0) var text_ink_stir_music: float = 0.4
+@export var persistent_ink: bool = false
+
+@export_group("Click lightning")
+@export_range(1, 6) var lightning_bolts: int = 3
+@export_range(2, 12) var lightning_segments: int = 5
+@export var lightning_segment_length: float = 0.06
+@export_range(0.0, 1.5) var lightning_jitter: float = 0.7
+@export_range(0.0, 0.6) var lightning_spread: float = 0.22
+@export var lightning_speed: float = 0.75
+@export_range(0.001, 0.03) var lightning_radius: float = 0.005
+@export var lightning_life: float = 0.1
+@export var lightning_travel: float = 0.018
+@export var lightning_strength: float = 1.3
+@export var lightning_stir: float = 2.8
+@export_range(0.0, 1.0) var lightning_fork_chance: float = 0.22
+@export_range(0, 3) var lightning_fork_depth: int = 2
+@export_range(0.0, 1.0) var lightning_branch_strength: float = 0.55
+
+@export_group("Excited blob")
+@export_range(0.0, 1.0) var blob_dye: float = 0.45
+@export_range(0.0, 1.0) var blob_ceil: float = 0.6
+@export_range(0.0, 1.0) var blob_swirl: float = 0.26
+@export_range(0.5, 24.0) var blob_swirl_scale: float = 12.0
+@export_range(0.0, 2.0) var blob_swirl_speed: float = 0.7
+@export_range(0.0, 0.1) var blob_edge: float = 0.014
+@export var blob_pulse_decay: float = 3.5
+
+@export_group("Palette")
+@export_range(0, 7) var palette_start_tier: int = 7
+@export var palette_transition_speed: float = 1.4
+@export var palette_bloom_decay: float = 1.2
+@export_range(0.0, 1.5) var palette_bloom_strength: float = 0.9
 
 @onready var _a: SubViewport = %SimA
 @onready var _b: SubViewport = %SimB
@@ -108,8 +152,24 @@ var _settle_age: float = -1.0
 
 ## Sparks currently in the air. Empty between text changes.
 var _sparks: Array[Spark] = []
+var _volley_stir: float = 0.0
+var _volley_radius: float = 0.0
+var _volley_strength: float = 1.0
+
+var _blob_pos: Vector2 = Vector2(-1.0, -1.0)
+var _blob_radius_px: float = 0.0
+var _blob_pulse: float = 0.0
+var _blob2_pos: Vector2 = Vector2(-1.0, -1.0)
+var _blob2_radius_px: float = 0.0
+var _blob2_pulse: float = 0.0
+
+var _palette_count: float = 7.0
+var _palette_target: float = 7.0
+var _bloom: float = 0.0
+var _bloom_index: int = 0
 ## Scratch buffers, rebuilt each active frame and pushed to the sim shader.
 var _spark_pos_buf: PackedVector2Array = PackedVector2Array()
+var _spark_end_buf: PackedVector2Array = PackedVector2Array()
 var _spark_vel_buf: PackedVector2Array = PackedVector2Array()
 var _spark_str_buf: PackedFloat32Array = PackedFloat32Array()
 
@@ -123,6 +183,9 @@ func _ready() -> void:
 	_display_material.shader = DISPLAY_SHADER
 	_display.material = _display_material
 	_display.mouse_filter = Control.MOUSE_FILTER_IGNORE
+
+	_palette_target = float(palette_start_tier)
+	_palette_count = _palette_target
 
 	var viewports: Array[SubViewport] = [_a, _b]
 	for viewport: SubViewport in viewports:
@@ -140,6 +203,7 @@ func _ready() -> void:
 	_dst = _b
 
 	_spark_pos_buf.resize(MAX_SPARKS)
+	_spark_end_buf.resize(MAX_SPARKS)
 	_spark_vel_buf.resize(MAX_SPARKS)
 	_spark_str_buf.resize(MAX_SPARKS)
 
@@ -149,7 +213,11 @@ func _ready() -> void:
 	get_viewport().size_changed.connect(_resize_text_mask)
 
 	SignalBus.fluid_sparks_requested.connect(spark_halo)
+	SignalBus.fluid_lightning_requested.connect(strike_lightning)
 	SignalBus.phrase_changed.connect(_on_phrase_changed)
+
+	if persistent_ink:
+		_ink_age = 0.0
 
 
 func _process(delta: float) -> void:
@@ -158,6 +226,7 @@ func _process(delta: float) -> void:
 
 	_update_sparks(delta)
 	_update_text_ink(delta)
+	_update_blob(delta)
 
 	_sim_material.set_shader_parameter("u_time", _elapsed)
 	_sim_material.set_shader_parameter("u_dt", dt)
@@ -176,8 +245,13 @@ func _process(delta: float) -> void:
 	# Render exactly one step into the write target this frame.
 	_dst.render_target_update_mode = SubViewport.UPDATE_ONCE
 
+	_palette_count = move_toward(_palette_count, _palette_target, palette_transition_speed * delta)
+	_bloom = maxf(_bloom - palette_bloom_decay * delta, 0.0)
 	_display_material.set_shader_parameter("u_time", _elapsed)
 	_display_material.set_shader_parameter("u_field", _dst.get_texture())
+	_display_material.set_shader_parameter("u_palette_count", _palette_count)
+	_display_material.set_shader_parameter("u_bloom", _bloom * palette_bloom_strength)
+	_display_material.set_shader_parameter("u_bloom_index", _bloom_index)
 
 	var previous_src: SubViewport = _src
 	_src = _dst
@@ -212,6 +286,10 @@ func splat(normalized_pos: Vector2, direction: Vector2) -> void:
 	_force_dir = direction
 
 
+func add_mask_content(content: CanvasItem) -> void:
+	_text_mask.add_child(content)
+
+
 ## Fire a halo of tiny outward sparks hugging [param normalized_rect] (normalized
 ## screen coordinates, Y-down / UV space). Replaces any volley still in the air.
 ## Used to punctuate a text change.
@@ -220,17 +298,137 @@ func spark_halo(normalized_rect: Rect2) -> void:
 	var reach: Vector2 = normalized_rect.size * 0.5 + Vector2(spark_margin, spark_margin)
 	var count: int = clampi(spark_count, 1, MAX_SPARKS)
 
+	_volley_stir = spark_stir
+	_volley_radius = spark_radius
+	_volley_strength = spark_strength
+
 	_sparks.clear()
 	for i: int in count:
 		var angle: float = TAU * float(i) / float(count) + randf_range(-0.25, 0.25)
 		var radial: Vector2 = Vector2(cos(angle), sin(angle))
 		var spark: Spark = Spark.new()
 		spark.pos = center + radial * reach * randf_range(0.95, 1.35)
+		spark.end_pos = spark.pos
 		spark.dir = radial.rotated(randf_range(-0.35, 0.35))
 		spark.speed = spark_speed * randf_range(0.5, 1.4)
 		spark.life = maxf(spark_life * randf_range(0.6, 1.3), 0.01)
 		spark.delay = randf_range(0.0, spark_stagger)
 		_sparks.append(spark)
+
+
+func strike_lightning(center: Vector2, radius: float) -> void:
+	var bolts: int = clampi(lightning_bolts, 1, MAX_SPARKS)
+
+	_volley_stir = lightning_stir
+	_volley_radius = lightning_radius
+	_volley_strength = lightning_strength
+
+	_sparks.clear()
+
+	var pending: Array[Branch] = []
+	for b: int in bolts:
+		var root_angle: float = TAU * (float(b) + randf_range(-0.4, 0.4)) / float(bolts)
+		var branch: Branch = Branch.new()
+		branch.axis = Vector2(cos(root_angle), sin(root_angle)).rotated(randf_range(-lightning_spread, lightning_spread))
+		branch.point = center + branch.axis * radius
+		branch.side = 1.0 if randf() < 0.5 else -1.0
+		branch.length = clampi(lightning_segments, 2, 12)
+		pending.append(branch)
+
+	while not pending.is_empty() and _sparks.size() < MAX_SPARKS:
+		var branch: Branch = pending.pop_front()
+		var point: Vector2 = branch.point
+		var side: float = branch.side
+		var is_fork: bool = branch.gen > 0
+		var len_scale: float = 0.7 if is_fork else 1.0
+		var strength_scale: float = lightning_branch_strength if is_fork else 1.0
+
+		for s: int in branch.length:
+			if _sparks.size() >= MAX_SPARKS:
+				break
+			var seg_frac: float = float(s) / float(maxi(branch.length - 1, 1))
+			side = -side if randf() < 0.8 else side
+			var straighten: float = 0.4 if s == 0 and not is_fork else 1.0
+			var heading: Vector2 = branch.axis.rotated(side * lightning_jitter * randf_range(0.4, 1.0) * straighten)
+			var next_point: Vector2 = point + heading * lightning_segment_length * randf_range(0.8, 1.35) * len_scale
+			var delay: float = branch.delay + seg_frac * lightning_travel
+
+			var spark: Spark = Spark.new()
+			spark.pos = point
+			spark.end_pos = next_point
+			spark.dir = heading
+			spark.strength = strength_scale
+			spark.speed = lightning_speed * randf_range(0.85, 1.15)
+			spark.life = maxf(lightning_life * randf_range(0.85, 1.15), 0.01)
+			spark.delay = delay
+			_sparks.append(spark)
+
+			if branch.gen < lightning_fork_depth and s >= 1 and s < branch.length - 1 \
+					and _sparks.size() < MAX_SPARKS - 1 and randf() < lightning_fork_chance:
+				var fork: Branch = Branch.new()
+				fork.point = next_point
+				fork.axis = heading.rotated(-side * randf_range(0.45, 1.0))
+				fork.side = 1.0 if randf() < 0.5 else -1.0
+				fork.length = randi_range(2, 4)
+				fork.gen = branch.gen + 1
+				fork.delay = delay
+				pending.append(fork)
+
+			point = next_point
+
+
+func set_excited_blob(normalized_pos: Vector2, radius_px: float) -> void:
+	_blob_pos = normalized_pos
+	_blob_radius_px = radius_px
+
+
+func set_excited_blob_2(normalized_pos: Vector2, radius_px: float) -> void:
+	_blob2_pos = normalized_pos
+	_blob2_radius_px = radius_px
+
+
+func pulse_excited_blob_2(amount: float = 1.0) -> void:
+	_blob2_pulse = minf(_blob2_pulse + amount, 1.5)
+
+
+func set_palette_tier(tier: int, snap: bool = false) -> void:
+	_palette_target = float(clampi(tier, 0, 7))
+	if snap:
+		_palette_count = _palette_target
+
+
+func bloom_palette(tier: int) -> void:
+	_bloom_index = clampi(tier - 1, 0, 6)
+	_bloom = 1.0
+
+
+func pulse_excited_blob(amount: float = 1.0) -> void:
+	_blob_pulse = minf(_blob_pulse + amount, 1.5)
+
+
+func _update_blob(delta: float) -> void:
+	_blob_pulse = maxf(_blob_pulse - blob_pulse_decay * delta, 0.0)
+	_blob2_pulse = maxf(_blob2_pulse - blob_pulse_decay * delta, 0.0)
+
+	var view: Vector2 = get_viewport().get_visible_rect().size
+	var aspect: float = view.x / maxf(view.y, 1.0)
+
+	_sim_material.set_shader_parameter("u_blob_pos", _blob_pos)
+	_sim_material.set_shader_parameter("u_blob_radius", _blob_radius_px / maxf(view.x, 1.0))
+	_sim_material.set_shader_parameter("u_blob_aspect", aspect)
+	_sim_material.set_shader_parameter("u_blob_dye", blob_dye)
+	_sim_material.set_shader_parameter("u_blob_ceil", blob_ceil)
+	_sim_material.set_shader_parameter("u_blob_swirl", blob_swirl)
+	_sim_material.set_shader_parameter("u_blob_swirl_scale", blob_swirl_scale)
+	_sim_material.set_shader_parameter("u_blob_swirl_speed", blob_swirl_speed)
+	_sim_material.set_shader_parameter("u_blob_edge", blob_edge)
+	_sim_material.set_shader_parameter("u_blob_pulse", _blob_pulse)
+
+	_sim_material.set_shader_parameter("u_blob2_pos", _blob2_pos)
+	_sim_material.set_shader_parameter("u_blob2_radius", _blob2_radius_px / maxf(view.x, 1.0))
+	_sim_material.set_shader_parameter("u_blob2_pulse", _blob2_pulse)
+
+	_motion_accum += (_blob_pulse + _blob2_pulse) * 0.4 * delta
 
 
 ## Advance every live spark, push the halo to the sim shader, and feed the music
@@ -246,9 +444,11 @@ func _update_sparks(delta: float) -> void:
 		var strength: float = 0.0
 		var vel: Vector2 = Vector2.ZERO
 		var pos: Vector2 = Vector2.ZERO
+		var end_pos: Vector2 = Vector2.ZERO
 		if i < _sparks.size():
 			var spark: Spark = _sparks[i]
 			pos = spark.pos
+			end_pos = spark.end_pos
 			if spark.delay > 0.0:
 				spark.delay -= delta
 				all_done = false
@@ -257,19 +457,21 @@ func _update_sparks(delta: float) -> void:
 				# sin envelope: ignite, peak, fade.
 				var env: float = sin(clampf(spark.age / spark.life, 0.0, 1.0) * PI)
 				env_sum += env
-				strength = env * spark_strength
+				strength = env * _volley_strength * spark.strength
 				vel = spark.dir * spark.speed * env
 				all_done = false
 		_spark_pos_buf[i] = pos
+		_spark_end_buf[i] = end_pos
 		_spark_vel_buf[i] = vel
 		_spark_str_buf[i] = strength
 
 	if env_sum > 0.0:
-		_motion_accum += (env_sum / float(_sparks.size())) * spark_stir * delta
+		_motion_accum += (env_sum / float(_sparks.size())) * _volley_stir * delta
 
 	_sim_material.set_shader_parameter("u_spark_count", _sparks.size())
-	_sim_material.set_shader_parameter("u_spark_radius", spark_radius)
+	_sim_material.set_shader_parameter("u_spark_radius", _volley_radius)
 	_sim_material.set_shader_parameter("u_spark_pos", _spark_pos_buf)
+	_sim_material.set_shader_parameter("u_spark_end", _spark_end_buf)
 	_sim_material.set_shader_parameter("u_spark_vel", _spark_vel_buf)
 	_sim_material.set_shader_parameter("u_spark_strength", _spark_str_buf)
 

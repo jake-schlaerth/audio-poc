@@ -16,6 +16,8 @@ signal phrase_changed(phrase: String, index: int)
 ## screen coordinates, Y-down). [FluidSim] listens and fires the volley.
 signal fluid_sparks_requested(normalized_rect: Rect2)
 
+signal fluid_lightning_requested(center: Vector2, radius: float)
+
 ## The smoothed fluid stir level changed; [param activity] is 0..1. [FluidAudio]
 ## listens and crossfades the music — connect here instead of polling [FluidSim].
 signal fluid_activity_changed(activity: float)
